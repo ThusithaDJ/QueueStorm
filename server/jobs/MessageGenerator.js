@@ -1,9 +1,8 @@
 /**
  * MessageGenerator — produces message bodies for the test runner.
- *
- * Currently generates sequential JSON payloads.
- * Future: support CSV rows and user-defined templates.
  */
+
+const TemplateEngine = require('./TemplateEngine')
 
 class MessageGenerator {
   /**
@@ -14,7 +13,10 @@ class MessageGenerator {
   constructor(opts = {}) {
     this.orderMode = (opts.orderMode || 'Sequential').toLowerCase()
     this.customRows = opts.customRows || null
+    this.columnMapping = opts.columnMapping || null
+    this.template = opts.template || null
     this._counter = 0
+    this._engine = new TemplateEngine()
   }
 
   /**
@@ -27,9 +29,22 @@ class MessageGenerator {
       ? Math.floor(Math.random() * 1e6) + 1
       : this._counter
 
+    // Template-based generation
+    if (this.template) {
+      return this._engine.render(this.template)
+    }
+
     if (this.customRows && this.customRows.length > 0) {
-      const row = this.customRows[(this._counter - 1) % this.customRows.length]
-      return row
+      const rowObj = this.customRows[(this._counter - 1) % this.customRows.length]
+      // Apply column mapping if provided
+      if (this.columnMapping && Object.keys(this.columnMapping).length > 0) {
+        const mapped = {}
+        for (const [csvCol, msgField] of Object.entries(this.columnMapping)) {
+          if (msgField) mapped[msgField] = rowObj[csvCol]
+        }
+        return JSON.stringify(mapped)
+      }
+      return typeof rowObj === 'string' ? rowObj : JSON.stringify(rowObj)
     }
 
     return JSON.stringify({

@@ -1,0 +1,86 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QueueStorm — single-command self-hosted deployment
+#
+# Usage:
+#   docker compose up -d
+#
+# Services:
+#   postgres  — PostgreSQL 16 database
+#   server    — Node.js / Express backend  (port 3001)
+#   client    — Vite-built static frontend served by nginx (port 80)
+#
+# Override defaults with a .env file in this directory or set env vars.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: queuestorm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-mysecretpassword}
+      POSTGRES_DB:       ${PGDATABASE:-queuestorm}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ── Backend (Express + WS) ───────────────────────────────────────────────────
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: queuestorm-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV:           production
+      PORT:               3001
+      PGHOST:             postgres
+      PGPORT:             5432
+      PGUSER:             ${PGUSER:-postgres}
+      PGPASSWORD:         ${PGPASSWORD:-mysecretpassword}
+      PGDATABASE:         ${PGDATABASE:-queuestorm}
+      QUEUESTORM_SECRET:  ${QUEUESTORM_SECRET:-change-me-in-production-use-32-byte-hex}
+    ports:
+      - "${SERVER_PORT:-3001}:3001"
+    networks:
+      - internal
+      - external
+
+  # ── Frontend (nginx static) ───────────────────────────────────────────────
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: "/api"
+    container_name: queuestorm-client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "${CLIENT_PORT:-80}:80"
+    networks:
+      - external
+
+volumes:
+  postgres_data:
+
+networks:
+  internal:
+    driver: bridge
+  external:
+    driver: bridge

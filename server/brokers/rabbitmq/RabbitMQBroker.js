@@ -123,7 +123,6 @@ class RabbitMQBroker extends BaseBroker {
     this._conn = null
     this._assertedQueues.clear()
   }
-}
 
   /**
    * Extract a human-readable error message from amqplib errors.

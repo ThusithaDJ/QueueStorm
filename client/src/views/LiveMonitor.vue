@@ -1,13 +1,13 @@
 <template>
   <main class="page">
-    <!-- ── No active job guard ───────────────────────────────────────────── -->
+    <!-- ── No active job guard ─────────────────────────────────────────────── -->
     <div v-if="!jobId" class="no-job">
       <p>No active job found.</p>
       <RouterLink to="/" class="btn btn-primary" style="margin-top:12px;">← Back to Config</RouterLink>
     </div>
 
     <template v-else>
-      <!-- ── Top bar ──────────────────────────────────────────────────────── -->
+      <!-- ── Top bar ────────────────────────────────────────────────────────── -->
       <div class="lm-header">
         <div class="lm-title-row">
           <h1 class="lm-title">Live Monitor</h1>
@@ -23,24 +23,34 @@
           </div>
         </div>
         <div class="lm-header-right">
+          <!-- WS connection indicator -->
+          <span class="ws-status" :class="wsConnected ? 'ws-ok' : 'ws-off'">
+            {{ wsConnected ? '⚡ live' : '○ connecting…' }}
+          </span>
           <span v-if="jobData" class="meta-info">
             {{ jobData.brokerType?.toUpperCase() }} ·
             {{ jobData.config?.destination }} ·
             {{ jobData.config?.messagesPerSec }} msg/s ·
             elapsed {{ jobData.elapsed }}s
           </span>
+          <button
+            v-if="isRunning || isPaused"
+            class="btn btn-secondary"
+            @click="togglePause"
+            :disabled="pausing"
+          >
+            {{ pausing ? '…' : isPaused ? '▶ Resume' : '⏸ Pause' }}
+          </button>
           <button class="btn btn-danger" @click="stopTest" :disabled="stopping">
             {{ stopping ? 'Stopping…' : '■ Stop' }}
           </button>
         </div>
       </div>
 
-      <!-- ── Error state ───────────────────────────────────────────────────── -->
-      <div v-if="pollError" class="error-banner">
-        ⚠ {{ pollError }}
-      </div>
+      <!-- ── Error state ──────────────────────────────────────────────────── -->
+      <div v-if="wsError" class="error-banner">⚠ {{ wsError }}</div>
 
-      <!-- ── Stats row ─────────────────────────────────────────────────────── -->
+      <!-- ── Stats row ────────────────────────────────────────────────────── -->
       <div class="stats-row">
         <div class="stat-card">
           <span class="stat-label">Sent</span>
@@ -60,9 +70,17 @@
             {{ jobData?.stats?.avgLatency ?? 0 }}<span class="stat-unit">ms</span>
           </span>
         </div>
+        <div class="stat-card">
+          <span class="stat-label">p50 / p95 / p99</span>
+          <span class="stat-value cyan" style="font-size:16px;">
+            {{ jobData?.stats?.p50 ?? 0 }} /
+            {{ jobData?.stats?.p95 ?? 0 }} /
+            {{ jobData?.stats?.p99 ?? 0 }}<span class="stat-unit">ms</span>
+          </span>
+        </div>
       </div>
 
-      <!-- ── Throughput chart ───────────────────────────────────────────────── -->
+      <!-- ── Throughput chart ──────────────────────────────────────────────── -->
       <div class="card chart-card">
         <div class="chart-header">
           <span class="chart-title">Throughput</span>
@@ -80,8 +98,6 @@
                 <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
               </linearGradient>
             </defs>
-
-            <!-- Grid lines -->
             <line v-for="y in [0,25,50,75,100]" :key="y"
               x1="0" :y1="yPos(y)" :x2="SVG_W" :y2="yPos(y)"
               stroke="var(--border)" stroke-width="1"
@@ -90,8 +106,6 @@
               :x="4" :y="yPos(y) - 4"
               fill="var(--muted)" font-size="9" font-family="var(--font-mono)"
             >{{ y }}</text>
-
-            <!-- Fill + line -->
             <polygon v-if="chartPoints.length >= 2"
               :points="fillPoints"
               fill="url(#chartGradient)"
@@ -101,7 +115,6 @@
               fill="none" stroke="var(--accent)" stroke-width="2"
               stroke-linejoin="round" stroke-linecap="round"
             />
-            <!-- Dots -->
             <circle v-for="(pt, i) in chartPoints" :key="i"
               :cx="pt.x" :cy="pt.y" r="3"
               fill="var(--accent)" opacity="0.7"
@@ -110,7 +123,7 @@
         </div>
       </div>
 
-      <!-- ── Message log ────────────────────────────────────────────────────── -->
+      <!-- ── Message log ───────────────────────────────────────────────────── -->
       <div class="card log-card">
         <div class="log-header">
           <span class="chart-title">Message Log</span>
@@ -151,23 +164,26 @@ import * as api from '../api/client.js'
 const route  = useRoute()
 const router = useRouter()
 
-const POLL_MS       = 800
 const SVG_W         = 600
 const SVG_H         = 120
 const MAX_CHART_PTS = 20
 
-// ── Job identity ─────────────────────────────────────────────────────────────
+// ── Job identity ──────────────────────────────────────────────────────────────
 const jobId   = computed(() => route.query.jobId || null)
 const jobData = ref(null)
 
-// ── UI state ─────────────────────────────────────────────────────────────────
-const pollError = ref(null)
-const stopping  = ref(false)
+// ── WebSocket state ───────────────────────────────────────────────────────────
+const wsConnected = ref(false)
+const wsError     = ref(null)
+const stopping    = ref(false)
 
-// ── Derived status ───────────────────────────────────────────────────────────
+// ── Derived status ────────────────────────────────────────────────────────────
 const isRunning = computed(() =>
   jobData.value?.status === 'running' || jobData.value?.status === 'pending'
 )
+
+const isPaused = computed(() => jobData.value?.status === 'paused')
+const pausing  = ref(false)
 
 const statusLabel = computed(() => {
   const s = jobData.value?.status
@@ -179,6 +195,7 @@ const statusBadgeClass = computed(() => {
   switch (jobData.value?.status) {
     case 'running':   return 'badge badge-ok'
     case 'pending':   return 'badge badge-warn'
+    case 'paused':    return 'badge badge-warn'
     case 'completed': return 'badge badge-ok'
     case 'stopped':   return 'badge badge-warn'
     case 'error':     return 'badge badge-err'
@@ -186,15 +203,15 @@ const statusBadgeClass = computed(() => {
   }
 })
 
-// ── Chart ────────────────────────────────────────────────────────────────────
+// ── Chart ─────────────────────────────────────────────────────────────────────
 const chartHistory = ref(Array(MAX_CHART_PTS).fill(0))
 
-const chartPoints = computed(() => {
-  return chartHistory.value.map((v, i) => ({
+const chartPoints = computed(() =>
+  chartHistory.value.map((v, i) => ({
     x: (i / (MAX_CHART_PTS - 1)) * SVG_W,
     y: yPos(Math.min(v, 100)),
   }))
-})
+)
 
 const linePoints = computed(() =>
   chartPoints.value.map(p => `${p.x},${p.y}`).join(' ')
@@ -212,58 +229,140 @@ function yPos(value) {
   return SVG_H - (value / 100) * SVG_H
 }
 
-// ── Log rows (from server) ───────────────────────────────────────────────────
+// ── Log rows ──────────────────────────────────────────────────────────────────
 const logRows = computed(() => jobData.value?.logEntries ?? [])
 
-// ── Polling ──────────────────────────────────────────────────────────────────
-let pollIntervalId = null
+// ── WebSocket connection ──────────────────────────────────────────────────────
+let ws            = null
+let pingInterval  = null
+let fallbackPoll  = null  // HTTP polling fallback if WS unavailable
 
-async function poll() {
+function connectWs() {
   if (!jobId.value) return
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  // Connect directly to the backend (bypassing Vite proxy which doesn't proxy WS by default)
+  const url = `${proto}//localhost:3001/ws`
+
+  try {
+    ws = new WebSocket(url)
+  } catch {
+    startFallbackPoll()
+    return
+  }
+
+  ws.addEventListener('open', () => {
+    wsConnected.value = true
+    wsError.value     = null
+    ws.send(JSON.stringify({ type: 'subscribe', jobId: jobId.value }))
+
+    // Keepalive ping every 20 s
+    pingInterval = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
+    }, 20000)
+  })
+
+  ws.addEventListener('message', (evt) => {
+    let msg
+    try { msg = JSON.parse(evt.data) } catch { return }
+
+    if (msg.type === 'snapshot' && msg.jobId === jobId.value) {
+      applySnapshot(msg.data)
+    }
+  })
+
+  ws.addEventListener('close', () => {
+    wsConnected.value = false
+    clearInterval(pingInterval)
+    // If job still running, fall back to HTTP polling
+    if (isRunning.value) startFallbackPoll()
+  })
+
+  ws.addEventListener('error', () => {
+    wsConnected.value = false
+    wsError.value = 'Real-time connection unavailable — falling back to polling'
+    startFallbackPoll()
+  })
+}
+
+function applySnapshot(data) {
+  if (!data) return
+  jobData.value = data
+
+  if (data.throughputHistory?.length) {
+    const padded = [...data.throughputHistory]
+    while (padded.length < MAX_CHART_PTS) padded.unshift(0)
+    chartHistory.value = padded.slice(-MAX_CHART_PTS)
+  }
+
+  // Stop polling/WS once terminal
+  if (['completed', 'stopped', 'error'].includes(data.status)) {
+    stopPolling()
+  }
+}
+
+// Fallback HTTP polling (if WS fails)
+function startFallbackPoll() {
+  if (fallbackPoll) return
+  fallbackPoll = setInterval(async () => {
+    if (!jobId.value) return
+    try {
+      const data = await api.getJob(jobId.value)
+      applySnapshot(data)
+    } catch (err) {
+      wsError.value = err.message
+      if (err.message.includes('not found') || err.message.includes('404')) stopPolling()
+    }
+  }, 1000)
+}
+
+function stopPolling() {
+  clearInterval(pingInterval)
+  clearInterval(fallbackPoll)
+  pingInterval = null
+  fallbackPoll = null
+}
+
+function closeWs() {
+  if (ws) {
+    ws.close()
+    ws = null
+  }
+  stopPolling()
+}
+
+onMounted(async () => {
+  if (!jobId.value) return
+  // Initial HTTP fetch so the page shows data immediately
   try {
     const data = await api.getJob(jobId.value)
-    jobData.value = data
-    pollError.value = null
-
-    // Sync chart from server throughput history
-    if (data.throughputHistory && data.throughputHistory.length > 0) {
-      const padded = [...data.throughputHistory]
-      while (padded.length < MAX_CHART_PTS) padded.unshift(0)
-      chartHistory.value = padded.slice(-MAX_CHART_PTS)
-    }
-
-    // Stop polling once the job reaches a terminal state
-    if (['completed', 'stopped', 'error'].includes(data.status)) {
-      clearPoll()
-    }
-  } catch (err) {
-    pollError.value = err.message
-    // If 404 (job gone), stop polling
-    if (err.message.includes('not found') || err.message.includes('404')) {
-      clearPoll()
-    }
-  }
-}
-
-function clearPoll() {
-  if (pollIntervalId !== null) {
-    clearInterval(pollIntervalId)
-    pollIntervalId = null
-  }
-}
-
-onMounted(() => {
-  if (!jobId.value) return
-  poll()
-  pollIntervalId = setInterval(poll, POLL_MS)
+    applySnapshot(data)
+  } catch {}
+  connectWs()
 })
 
-onUnmounted(clearPoll)
+onUnmounted(closeWs)
 
-// ── Stop ─────────────────────────────────────────────────────────────────────
+// ── Pause / Resume ────────────────────────────────────────────────────────────
+async function togglePause() {
+  pausing.value = true
+  try {
+    if (isPaused.value) {
+      await api.resumeJob(jobId.value)
+    } else {
+      await api.pauseJob(jobId.value)
+    }
+  } catch (err) {
+    console.warn('[LiveMonitor] pause/resume error:', err.message)
+  } finally {
+    pausing.value = false
+  }
+}
+
+// ── Stop ──────────────────────────────────────────────────────────────────────
 async function stopTest() {
   stopping.value = true
-  clearPoll()
+  closeWs()
   try {
     if (jobId.value) await api.stopJob(jobId.value)
   } catch (err) {
@@ -276,7 +375,15 @@ async function stopTest() {
 </script>
 
 <style scoped>
-/* ── No-job guard ───────────────────────────────────────────────────────── */
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 .no-job {
   display: flex;
   flex-direction: column;
@@ -287,7 +394,6 @@ async function stopTest() {
   font-size: 15px;
 }
 
-/* ── Header ─────────────────────────────────────────────────────────────── */
 .lm-header {
   display: flex;
   align-items: center;
@@ -317,20 +423,29 @@ async function stopTest() {
   gap: 14px;
 }
 
+.ws-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 10px;
+}
+
+.ws-ok  { background: rgba(0, 255, 163, 0.1); color: var(--green); }
+.ws-off { background: rgba(107, 107, 138, 0.1); color: var(--muted); }
+
 .meta-info {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--muted);
 }
 
-/* ── Progress bar ───────────────────────────────────────────────────────── */
 .progress-wrap {
   position: relative;
   width: 120px;
   height: 6px;
   background: var(--border);
   border-radius: 3px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .progress-bar {
@@ -351,7 +466,6 @@ async function stopTest() {
   white-space: nowrap;
 }
 
-/* ── Error banner ───────────────────────────────────────────────────────── */
 .error-banner {
   background: rgba(255, 77, 109, 0.1);
   border: 1px solid rgba(255, 77, 109, 0.3);
@@ -363,10 +477,9 @@ async function stopTest() {
   font-family: var(--font-mono);
 }
 
-/* ── Stats row ──────────────────────────────────────────────────────────── */
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 14px;
   margin-bottom: 18px;
 }
@@ -377,10 +490,7 @@ async function stopTest() {
   margin-left: 3px;
 }
 
-/* ── Chart ──────────────────────────────────────────────────────────────── */
-.chart-card {
-  margin-bottom: 18px;
-}
+.chart-card { margin-bottom: 18px; }
 
 .chart-header {
   display: flex;
@@ -415,7 +525,6 @@ async function stopTest() {
   display: block;
 }
 
-/* ── Log table ──────────────────────────────────────────────────────────── */
 .log-card {
   padding: 0;
   overflow: hidden;
@@ -434,7 +543,5 @@ async function stopTest() {
   max-height: 340px;
 }
 
-.notes-cell {
-  color: var(--muted);
-}
+.notes-cell { color: var(--muted); }
 </style>

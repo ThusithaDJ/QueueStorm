@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { getBrokerClass } = require('../brokers/registry')
-const { createJob, getJob, stopJob, listJobs } = require('../jobs/JobManager')
+const { createJob, getJob, stopJob, pauseJob, resumeJob, listJobs } = require('../jobs/JobManager')
 
 const router = Router()
 
@@ -75,6 +75,30 @@ router.post('/:id/stop', (req, res) => {
   try {
     stopJob(req.params.id)
     return res.json({ status: 'stopped' })
+  } catch (err) {
+    return res.status(404).json({ error: err.message })
+  }
+})
+
+/**
+ * POST /api/jobs/:id/pause
+ */
+router.post('/:id/pause', (req, res) => {
+  try {
+    pauseJob(req.params.id)
+    return res.json({ status: 'paused' })
+  } catch (err) {
+    return res.status(404).json({ error: err.message })
+  }
+})
+
+/**
+ * POST /api/jobs/:id/resume
+ */
+router.post('/:id/resume', (req, res) => {
+  try {
+    resumeJob(req.params.id)
+    return res.json({ status: 'running' })
   } catch (err) {
     return res.status(404).json({ error: err.message })
   }
