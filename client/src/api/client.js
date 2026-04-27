@@ -147,6 +147,37 @@ export async function uploadCsv(file) {
   return data
 }
 
+// ── SSL Certificates (v1) ─────────────────────────────────────────────────────
+
+/**
+ * Upload cert files to the server SSL store.
+ * @param {{ ca?: File, cert?: File, key?: File, pfx?: File, passphrase?: string }} files
+ * @returns {Promise<{ certId: string, uploaded: string[], filenames: object }>}
+ */
+export async function uploadSslCerts(files) {
+  const form = new FormData()
+  for (const [field, file] of Object.entries(files)) {
+    if (field === 'passphrase' && typeof file === 'string') {
+      form.append('passphrase', file)
+    } else if (file instanceof File) {
+      form.append(field, file)
+    }
+  }
+  const res = await fetch(`${BASE}/v1/ssl-certs`, { method: 'POST', body: form })
+  let data
+  try { data = await res.json() } catch { data = null }
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+  return data
+}
+
+export async function getSslCertInfo(certId) {
+  return request('GET', `/v1/ssl-certs/${certId}`)
+}
+
+export async function deleteSslCert(certId) {
+  return request('DELETE', `/v1/ssl-certs/${certId}`)
+}
+
 // ── Auth (v1) ─────────────────────────────────────────────────────────────────
 
 export async function register(data) {

@@ -16,6 +16,7 @@ const uploadsRouter      = require('./routes/v1/uploads')
 const messagesRouter     = require('./routes/v1/messages')
 const logAnalyserRouter  = require('./routes/v1/logAnalyser')
 const authRouter         = require('./routes/v1/auth')
+const sslCertsRouter     = require('./routes/v1/sslCerts')
 
 const app    = express()
 const server = http.createServer(app)
@@ -48,6 +49,7 @@ app.use('/api/v1/uploads',      uploadsRouter)
 app.use('/api/v1/messages',     messagesRouter)
 app.use('/api/v1/log-analyser', logAnalyserRouter)
 app.use('/api/v1/auth',         authRouter)
+app.use('/api/v1/ssl-certs',    sslCertsRouter)
 
 // ── Global error handler (must be last) ──────────────────────────────────────
 app.use(errorHandler)

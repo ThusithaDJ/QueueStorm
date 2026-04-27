@@ -13,6 +13,7 @@ export const BROKER_DEFS = [
     label: 'RabbitMQ',
     color: '#ff6600',
     implemented: true,
+    sslSupported: true,
     protocols: ['AMQP'],
     defaultProtocol: 'AMQP',
     connectionFields: [
@@ -24,10 +25,26 @@ export const BROKER_DEFS = [
     ],
   },
   {
+    value: 'amq-artemis',
+    label: 'Red Hat AMQ (Artemis)',
+    color: '#cc0000',
+    implemented: true,
+    sslSupported: true,
+    protocols: ['AMQP 1.0'],
+    defaultProtocol: 'AMQP 1.0',
+    connectionFields: [
+      { key: 'host',     label: 'Host',     type: 'text',     defaultVal: 'localhost', placeholder: 'amq-broker.internal', span: 2 },
+      { key: 'port',     label: 'Port',     type: 'number',   defaultVal: 5672,        placeholder: '5672 / 5671 (SSL)',   span: 1 },
+      { key: 'username', label: 'Username', type: 'text',     defaultVal: '',          placeholder: 'admin',               span: 1 },
+      { key: 'password', label: 'Password', type: 'password', defaultVal: '',          placeholder: '••••••••',            span: 2 },
+    ],
+  },
+  {
     value: 'activemq',
     label: 'Apache ActiveMQ',
     color: '#e8a838',
     implemented: false,
+    sslSupported: true,
     protocols: ['STOMP', 'OpenWire', 'AMQP'],
     defaultProtocol: 'STOMP',
     connectionFields: [

@@ -5,11 +5,13 @@
  * To register a new broker, import its class here and add it to the map.
  */
 
-const RabbitMQBroker = require('./rabbitmq/RabbitMQBroker')
+const RabbitMQBroker     = require('./rabbitmq/RabbitMQBroker')
+const AMQArtemisBroker   = require('./amqArtemis/AMQArtemisBroker')
 
 /** @type {Record<string, typeof import('./BaseBroker')>} */
 const registry = {
-  rabbitmq: RabbitMQBroker,
+  rabbitmq:    RabbitMQBroker,
+  'amq-artemis': AMQArtemisBroker,
   // activemq: ActiveMQBroker,   // future
   // kafka:    KafkaBroker,       // future
   // ibmmq:    IBMMQBroker,       // future
